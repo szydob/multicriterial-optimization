@@ -24,52 +24,40 @@ Smoke-test CLI:
 uv run owd
 ```
 
-Uruchomienie stubu Streamlit:
+Uruchomienie Streamlit:
 
 ```bash
 uv run streamlit run app/streamlit_app.py
 ```
 
-Testy (kontrakty / stuby):
+Testy:
 
 ```bash
 uv run pytest
 ```
 
-Opcjonalnie wykresy (Plotly):
-
-```bash
-uv sync --extra viz
-```
 ## Layout
 
 ```
-app/                 Streamlit UI
+app/                 Streamlit UI (sidebar + panel wyników)
 data/examples/       Przykładowe zestawy punktów
 docs/                Notatki z labów / decyzje
-notebooks/           Eksperymenty (opcjonalnie)
 outputs/             Wyniki, eksporty (gitignored)
 src/owd/
-  algorithms/        Algorytmy P(X) — na razie stuby
+  algorithms/        Naiwne, punkt idealny, Kung–Luccio–Preparata
+  animation.py       Klatki animacji budowy P(X)
   dominance.py       Porównania dominacji
+  export.py          Eksport XLSX / CSV
   generators.py      Generowanie zbiorów losowych
   metrics.py         Licznik porównań + czas
   types.py           Modele danych (kryteria, wynik)
+  visualization.py   Wykresy Plotly (2D / 3D)
 tests/
 ```
 
-## Plan funkcji (zgodny z labem)
+## Funkcje GUI
 
-1. Konfiguracja kryteriów (min/max niezależnie)
-2. Generowanie / wczytanie zbioru \(X\) (jednostajny, Gauss, wykładniczy, Poisson)
-3. Algorytmy:
-   - naiwny bez filtracji
-   - naiwny z filtracją punktów zdominowanych
-   - punkt idealny (sortowanie odległości + filtracja)
-   - Kung–Luccio–Preparata
-4. Benchmark: liczba porównań punktów / współrzędnych, czas
-5. Wizualizacja frontu Pareto (2D / 3D, później animacja)
+1. **Sidebar (zwijany)** — kryteria, generator, sortowanie, wczytywanie pliku, wybór algorytmu
+2. **Panel główny** — metryki, P(X), wykres, animacja, benchmark, eksport XLS
+3. Algorytmy: naiwny bez/z filtracją, punkt idealny, Kung–Luccio–Preparata
 
-## Status
-
-Szkielet projektu + kontrakty API. Implementacje algorytmów i pełne GUI — w kolejnych krokach.

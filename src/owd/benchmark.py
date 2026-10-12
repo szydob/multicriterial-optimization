@@ -18,8 +18,8 @@ def run_benchmark(
     """
     Uruchamia wybrane algorytmy i zbiera metryki.
 
-    Na razie zwraca wiersze z NotImplementedError → status 'pending'.
-    Po implementacji: point_comparisons, coordinate_comparisons, elapsed_seconds, |P(X)|.
+    Zwraca point_comparisons, coordinate_comparisons, elapsed_seconds, |P(X)|.
+    Błędy / brak implementacji oznaczane są w kolumnie status.
     """
     if algorithms is None:
         algorithms = list(ALGORITHMS.keys())

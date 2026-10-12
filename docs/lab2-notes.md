@@ -6,10 +6,10 @@
 
 | ID | Opis | Status |
 |----|------|--------|
-| `naive_no_filter` | Naiwny bez filtracji (pseudokod str. 2) | stub |
-| `naive_with_filter` | Naiwny z filtracją zdominowanych (str. 3) | stub |
-| `ideal_point` | Punkt idealny + sort odległości (str. 4) | stub |
-| `kung_luccio_preparata` | Kung–Luccio–Preparata | stub |
+| `naive_no_filter` | Naiwny bez filtracji (pseudokod str. 2) | done |
+| `naive_with_filter` | Naiwny z filtracją zdominowanych (str. 3) | done |
+| `ideal_point` | Punkt idealny + sort odległości (str. 4) | done |
+| `kung_luccio_preparata` | Kung–Luccio–Preparata | done |
 
 ## Przykład z instrukcji
 
