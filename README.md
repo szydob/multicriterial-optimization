@@ -14,8 +14,14 @@ Kurs: *Optymalizacja wielokryterialna* (AGH, LAiWD KAiR), ćwiczenie 2 — na po
 ## Setup
 
 ```bash
-cd owd
+cd /Users/szydob/Studia/sem_9/optymalizacja_wielokryterialna/owd
 uv sync
+```
+
+Smoke-test CLI:
+
+```bash
+uv run owd
 ```
 
 Uruchomienie stubu Streamlit:
@@ -24,12 +30,17 @@ Uruchomienie stubu Streamlit:
 uv run streamlit run app/streamlit_app.py
 ```
 
-Testy:
+Testy (kontrakty / stuby):
 
 ```bash
 uv run pytest
 ```
 
+Opcjonalnie wykresy (Plotly):
+
+```bash
+uv sync --extra viz
+```
 ## Layout
 
 ```
