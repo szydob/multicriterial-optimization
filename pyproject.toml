@@ -9,7 +9,9 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "numpy>=2.0",
+    "openpyxl>=3.1",
     "pandas>=2.2",
+    "plotly>=5.24",
     "streamlit>=1.40",
 ]
 
@@ -17,6 +19,7 @@ dependencies = [
 viz = [
     "plotly>=5.24",
 ]
+
 
 [project.scripts]
 owd = "owd.cli:main"

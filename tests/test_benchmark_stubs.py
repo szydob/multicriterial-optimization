@@ -5,12 +5,13 @@ from owd.benchmark import run_benchmark
 from owd.generators import LAB_EXAMPLE_POINTS
 
 
-def test_benchmark_reports_pending_stubs() -> None:
+def test_benchmark_all_algorithms_ok() -> None:
     df = run_benchmark(LAB_EXAMPLE_POINTS, default_criteria(2))
     assert df.set_index("algorithm")["status"].to_dict() == {
         "naive_no_filter": "ok",
         "naive_with_filter": "ok",
-        "ideal_point": "pending",
-        "kung_luccio_preparata": "pending",
+        "ideal_point": "ok",
+        "kung_luccio_preparata": "ok",
     }
     assert len(df) == 4
+    assert (df["n_nondominated"] == 3).all()

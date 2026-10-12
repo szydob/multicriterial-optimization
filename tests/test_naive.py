@@ -30,7 +30,8 @@ def test_against_pairwise_reference(algorithm, k):
         points = rng.integers(-3, 4, size=(n, k)).astype(float)
         normalized = points * np.array([1 if c.sense == Sense.MIN else -1 for c in criteria])
         expected = [
-            i for i in range(n)
+            i
+            for i in range(n)
             if not any(
                 np.all(other <= normalized[i]) and np.any(other < normalized[i])
                 for other in normalized
@@ -43,11 +44,11 @@ def test_against_pairwise_reference(algorithm, k):
 
 @pytest.mark.parametrize("algorithm", [naive_no_filter, naive_with_filter])
 def test_duplicates_and_validation(algorithm):
-    result = algorithm(np.array([[1., 1.], [1., 1.], [2., 2.]]), criteria=default_criteria(2))
+    result = algorithm(np.array([[1.0, 1.0], [1.0, 1.0], [2.0, 2.0]]), criteria=default_criteria(2))
     np.testing.assert_array_equal(result.nondominated_indices, [0, 1])
     with pytest.raises(ValueError, match="number of columns"):
         algorithm(np.zeros((2, 3)), criteria=default_criteria(2))
     with pytest.raises(ValueError, match="2D"):
         algorithm(np.zeros(2), criteria=default_criteria(2))
     with pytest.raises(ValueError, match="finite"):
-        algorithm(np.array([[np.nan, 1.]]), criteria=default_criteria(2))
+        algorithm(np.array([[np.nan, 1.0]]), criteria=default_criteria(2))
