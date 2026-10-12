@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[oc]
+*.so
+build/
+dist/
+wheels/
+*.egg-info
+.eggs/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.DS_Store
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# UV / venv
+.venv/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Outputs / local notes
+outputs/
+*.xlsx
+*.xls
+!data/examples/**
+PROJECT_STATUS.md
+.env
+.env.*
+
+# Jupyter
+.ipynb_checkpoints/
+notebooks/.ipynb_checkpoints/
