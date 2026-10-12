@@ -644,12 +644,12 @@ source = { editable = "." }
 dependencies = [
     { name = "numpy" },
     { name = "pandas" },
+    { name = "streamlit" },
 ]
 
 [package.optional-dependencies]
-app = [
+viz = [
     { name = "plotly" },
-    { name = "streamlit" },
 ]
 
 [package.dev-dependencies]
@@ -665,10 +665,10 @@ dev = [
 requires-dist = [
     { name = "numpy", specifier = ">=2.0" },
     { name = "pandas", specifier = ">=2.2" },
-    { name = "plotly", marker = "extra == 'app'", specifier = ">=5.24" },
-    { name = "streamlit", marker = "extra == 'app'", specifier = ">=1.40" },
+    { name = "plotly", marker = "extra == 'viz'", specifier = ">=5.24" },
+    { name = "streamlit", specifier = ">=1.40" },
 ]
-provides-extras = ["app"]
+provides-extras = ["viz"]
 
 [package.metadata.requires-dev]
 dev = [
