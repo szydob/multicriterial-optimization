@@ -1,3 +1,5 @@
+"""Plotly figures for Cw3: decision space U and objective space F(U) / FP(U)."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -5,13 +7,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from owd.scalarization.methods import FrontApproximation, ScalarizationSolution, sort_front_by_f1
-from owd.scalarization.problem import (
-    DEFAULT_PROBLEM,
-    LB,
-    UB,
-    BiObjectiveProblem,
-    sample_feasible_grid,
-)
+from owd.scalarization.problem import DEFAULT_PROBLEM, BiObjectiveProblem, sample_feasible_grid
 
 _BG = "#0f172a"
 _PAPER = "#111827"
@@ -41,7 +37,7 @@ def _attainable_cloud(
     problem: BiObjectiveProblem,
     n_per_axis: int = 35,
 ) -> tuple[np.ndarray, np.ndarray]:
-    U = sample_feasible_grid(n_per_axis)
+    U = sample_feasible_grid(problem, n_per_axis)
     F = problem.evaluate_many(U)
     return U, F
 
@@ -51,35 +47,47 @@ def build_decision_figure(
     front: FrontApproximation | None = None,
     single: ScalarizationSolution | None = None,
     problem: BiObjectiveProblem | None = None,
-    title: str = "Przestrzeń decyzji U = [1,4]²",
+    title: str = "Przestrzeń decyzji U",
 ) -> go.Figure:
-    """Feasible square + Pareto decisions P(U,F) (+ optional single solve)."""
     problem = problem or DEFAULT_PROBLEM
     U, _ = _attainable_cloud(problem, n_per_axis=25)
     fig = go.Figure()
 
-    # Feasible square outline
-    box_x = [LB[0], UB[0], UB[0], LB[0], LB[0]]
-    box_y = [LB[1], LB[1], UB[1], UB[1], LB[1]]
+    lb, ub = problem.lb, problem.ub
+    box_x = [lb[0], ub[0], ub[0], lb[0], lb[0]]
+    box_y = [lb[1], lb[1], ub[1], ub[1], lb[1]]
     fig.add_trace(
         go.Scatter(
             x=box_x,
             y=box_y,
             mode="lines",
-            name="U (kwadrat)",
+            name="obox U",
             line=dict(color="#94a3b8", width=2, dash="dot"),
         )
     )
-    fig.add_trace(
-        go.Scatter(
-            x=U[:, 0],
-            y=U[:, 1],
-            mode="markers",
-            name="siatka U",
-            marker=dict(size=3, color=_FEASIBLE, opacity=0.25),
-            hoverinfo="skip",
+    if problem.id == "unit_disk":
+        theta = np.linspace(0, 2 * np.pi, 200)
+        fig.add_trace(
+            go.Scatter(
+                x=np.cos(theta),
+                y=np.sin(theta),
+                mode="lines",
+                name="brzeg koła",
+                line=dict(color="#e2e8f0", width=1.5),
+            )
         )
-    )
+
+    if len(U):
+        fig.add_trace(
+            go.Scatter(
+                x=U[:, 0],
+                y=U[:, 1],
+                mode="markers",
+                name="siatka U",
+                marker=dict(size=3, color=_FEASIBLE, opacity=0.25),
+                hoverinfo="skip",
+            )
+        )
 
     if front is not None:
         sorted_front = sort_front_by_f1(front)
@@ -106,8 +114,14 @@ def build_decision_figure(
             )
         )
 
-    fig.update_xaxes(title_text="x", range=[0.8, 4.2])
-    fig.update_yaxes(title_text="y", range=[0.8, 4.2], scaleanchor="x", scaleratio=1)
+    pad = 0.1 * float(np.max(ub - lb))
+    fig.update_xaxes(title_text="x", range=[lb[0] - pad, ub[0] + pad])
+    fig.update_yaxes(
+        title_text="y",
+        range=[lb[1] - pad, ub[1] + pad],
+        scaleanchor="x",
+        scaleratio=1,
+    )
     return _layout_style(fig, title)
 
 
@@ -118,20 +132,20 @@ def build_objective_figure(
     problem: BiObjectiveProblem | None = None,
     title: str = "Przestrzeń celów F(U) / FP(U)",
 ) -> go.Figure:
-    """Attainable set cloud + approximated nondominated front FP(U)."""
     problem = problem or DEFAULT_PROBLEM
     _, F = _attainable_cloud(problem, n_per_axis=35)
     fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=F[:, 0],
-            y=F[:, 1],
-            mode="markers",
-            name="F(U) (siatka)",
-            marker=dict(size=4, color=_FEASIBLE, opacity=0.35),
-            hoverinfo="skip",
+    if len(F):
+        fig.add_trace(
+            go.Scatter(
+                x=F[:, 0],
+                y=F[:, 1],
+                mode="markers",
+                name="F(U) (siatka)",
+                marker=dict(size=4, color=_FEASIBLE, opacity=0.35),
+                hoverinfo="skip",
+            )
         )
-    )
 
     if front is not None:
         sorted_front = sort_front_by_f1(front)
@@ -170,7 +184,6 @@ def build_cw3_figures(
     problem: BiObjectiveProblem | None = None,
     method_label: str = "",
 ) -> tuple[go.Figure, go.Figure]:
-    """Return (decision_fig, objective_fig)."""
     suffix = f" · {method_label}" if method_label else ""
     return (
         build_decision_figure(
@@ -195,7 +208,6 @@ def build_combined_figure(
     problem: BiObjectiveProblem | None = None,
     method_label: str = "",
 ) -> go.Figure:
-    """Side-by-side decision / objective view (optional compact layout)."""
     dfig, ofig = build_cw3_figures(
         front=front, single=single, problem=problem, method_label=method_label
     )

@@ -1,7 +1,7 @@
 [project]
 name = "owd"
 version = "0.1.0"
-description = "Optymalizacja wielokryterialna dyskretna — punkty niezdominowane (Pareto), benchmark i Streamlit"
+description = "Optymalizacja wielokryterialna — P(X) (Ćw.2) i skalaryzacja / front Pareta (Ćw.3), Streamlit"
 readme = "README.md"
 authors = [
     { name = "Szymon Dobrowolski", email = "szydob1@gmail.com" }
