@@ -85,14 +85,11 @@ METHOD_LABELS = {
 
 def benchmark_scalarization(
     *,
-    instance_ids: list[str] | None = None,  # kept for API compat; ignored
     n_sweep: int = 30,
     p_distance: float = 2.0,
-    problem: BiObjectiveProblem | None = None,
 ) -> pd.DataFrame:
-    """Compare S1/S2/S3 sweeps on U=[1,4]²."""
-    del instance_ids  # only one instance supported
-    problem = problem or DEFAULT_PROBLEM
+    """Compare S1/S2/S3 sweeps on the sole instance U=[1,4]²."""
+    problem = DEFAULT_PROBLEM
     rows: list[dict] = []
     for method in ("weighted_sum", "epsilon_constraint", "distance"):
         front = run_method_sweep(method, n_sweep, problem, p=p_distance)

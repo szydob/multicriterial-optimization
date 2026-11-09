@@ -119,9 +119,9 @@ def _render_benchmark_mode(problem, n_points: int) -> None:
 
     if run_bench:
         with st.spinner("Benchmark S1 / S2 / S3…"):
+            # Only U=[1,4]² is supported — use package default problem.
             st.session_state.cw3_bench = benchmark_scalarization(
                 n_sweep=int(n_points),
-                problem=problem,
             )
             fronts = {}
             for method in ("weighted_sum", "epsilon_constraint", "distance"):
@@ -334,11 +334,7 @@ def render_cw3() -> None:
     """Render the Ćwiczenie 3 UI with a first-class Benchmark mode."""
     _init_cw3_state()
 
-    st.title("Ćw. 3 — metody skalaryzacji")
-    st.caption(
-        "Przełącz **tryb** poniżej: Benchmark porównuje S1/S2/S3 obok siebie "
-        "(czas + front). Sweep / pojedyncze — jedna metoda."
-    )
+    st.title("Metody skalaryzacji")
 
     # ── Main-panel mode switch (hard to miss) ────────────────────────────────
     ui_mode = st.radio(
@@ -353,10 +349,7 @@ def render_cw3() -> None:
     f_min, f_max = estimate_objective_bounds(problem, n_per_axis=80)
 
     with st.sidebar:
-        st.markdown("## Ćw. 3 — ustawienia")
-        st.success("Jesteś w panelu Ćw. 3 (nie Ćw. 2).")
-        st.caption("Zbiór dopuszczalny: **U = [1, 4] × [1, 4]** (jedyna instancja).")
-
+        st.markdown("## Ustawienia")
         n_points = st.slider("Liczba punktów aproksymacji n", 5, 80, 30, 1)
 
         method = st.session_state.cw3_method
@@ -420,12 +413,6 @@ def render_cw3() -> None:
             st.session_state.cw3_bench = None
             st.session_state.cw3_bench_fronts = None
 
-    st.markdown(
-        f"**Instancja:** {problem.name}  \n"
-        f"`{problem.f1_latex}` · `{problem.f2_latex}`  \n"
-        f"Zakresy (siatka): F₁ ∈ [{f_min[0]:.3f}, {f_max[0]:.3f}], "
-        f"F₂ ∈ [{f_min[1]:.3f}, {f_max[1]:.3f}]"
-    )
 
     if ui_mode == "benchmark":
         _render_benchmark_mode(problem, n_points)
