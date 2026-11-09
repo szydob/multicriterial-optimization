@@ -1,9 +1,10 @@
-"""Cw3 Streamlit panel: scalarization, Pareto sweeps, timing benchmark."""
+"""Cw3 Streamlit panel: scalarization, Pareto sweeps, visible S1/S2/S3 benchmark mode."""
 
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import plotly.express as px
 import streamlit as st
 
 from owd.scalarization import (
@@ -19,6 +20,8 @@ from owd.scalarization import (
     sweep_epsilon_constraint,
     sweep_weighted_sum,
 )
+from owd.scalarization.benchmark import METHOD_LABELS as BENCH_METHOD_LABELS
+from owd.scalarization.benchmark import run_method_sweep
 from owd.scalarization.visualization import build_cw3_figures
 
 METHOD_LABELS = {
@@ -34,6 +37,12 @@ P_CHOICES = {
     "∞ (Czebyszew)": float("inf"),
 }
 
+CW3_MODES = {
+    "benchmark": "⚡ Benchmark — porównaj S1 / S2 / S3",
+    "sweep": "Sweep Pareta (jedna metoda)",
+    "single": "Pojedyncze rozwiązanie",
+}
+
 
 def _init_cw3_state() -> None:
     defaults = {
@@ -41,123 +50,178 @@ def _init_cw3_state() -> None:
         "cw3_single": None,
         "cw3_method": "weighted_sum",
         "cw3_bench": None,
+        "cw3_bench_fronts": None,
         "cw3_instance": "square_m1_1",
+        "cw3_ui_mode": "benchmark",
     }
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
 
 
-def render_cw3() -> None:
-    """Render the Ćwiczenie 3 scalarization + Pareto reconstruction UI."""
-    _init_cw3_state()
-
-    st.title("Ćw. 3 — metody skalaryzacji")
-    st.caption(
-        "Porównanie S1 / S2 / S3: rekonstrukcja P(U,F) i FP(U) przez sweep parametrów "
-        "oraz pomiar czasu pojedynczych solve’ów i całych sweepów."
+def _bench_show_table(bench_df: pd.DataFrame) -> pd.DataFrame:
+    show = bench_df[
+        [
+            "instance",
+            "method_label",
+            "n_success",
+            "success_rate",
+            "sweep_time_ms",
+            "mean_solve_ms",
+            "median_solve_ms",
+            "f1_span",
+            "f2_span",
+            "mean_spacing",
+            "dominated_share",
+        ]
+    ].copy()
+    return show.rename(
+        columns={
+            "instance": "U",
+            "method_label": "Metoda",
+            "n_success": "|P|",
+            "success_rate": "sukces",
+            "sweep_time_ms": "sweep [ms]",
+            "mean_solve_ms": "śr. solve [ms]",
+            "median_solve_ms": "mediana solve [ms]",
+            "f1_span": "rozpiętość F1",
+            "f2_span": "rozpiętość F2",
+            "mean_spacing": "śr. odstęp",
+            "dominated_share": "udział zdominowanych",
+        }
     )
 
-    with st.sidebar:
-        st.markdown("## Cw3 — skalaryzacja")
-        instance_id = st.selectbox(
-            "Zbiór dopuszczalny U",
-            options=list(INSTANCES.keys()),
-            format_func=lambda i: INSTANCES[i].name,
-            index=list(INSTANCES.keys()).index(st.session_state.cw3_instance)
-            if st.session_state.cw3_instance in INSTANCES
-            else 0,
-            key="cw3_instance_select",
-        )
-        st.session_state.cw3_instance = instance_id
-        problem = get_problem(instance_id)
-        f_min, f_max = estimate_objective_bounds(problem, n_per_axis=50)
 
-        method = st.selectbox(
-            "Metoda",
-            options=list(METHOD_LABELS.keys()),
-            format_func=lambda m: METHOD_LABELS[m],
-            key="cw3_method_select",
-        )
-        st.session_state.cw3_method = method
-
-        mode = st.radio(
-            "Tryb",
-            options=["sweep", "single"],
-            format_func=lambda m: (
-                "Odtwórz zbiór Pareta (sweep)" if m == "sweep" else "Pojedyncze rozwiązanie"
-            ),
-            horizontal=False,
-        )
-        n_points = st.slider("Liczba punktów aproksymacji n", 5, 80, 30, 1)
-
-        lam1 = 0.5
-        primary = 0
-        a_eps = float(0.5 * (f_min[1] + f_max[1]))
-        p_val = 2.0
-        ref1, ref2 = float(f_min[0] - 0.1), float(f_min[1] - 0.1)
-
-        if method == "weighted_sum":
-            st.markdown("### Parametry S1")
-            st.caption("λ > 0, λ₁+λ₂=1. Sweep: stały krok ρ po simplexie.")
-            if mode == "single":
-                lam1 = st.slider("λ₁ (λ₂ = 1−λ₁)", 0.01, 0.99, 0.5, 0.01)
-        elif method == "epsilon_constraint":
-            st.markdown("### Parametry S2")
-            primary = st.radio(
-                "Kryterium optymalizowane Fⱼ",
-                options=[0, 1],
-                format_func=lambda i: f"F{i + 1}",
-                horizontal=True,
-            )
-            constrained = 1 - primary
-            st.caption(f"Ograniczenie: F{constrained + 1}(u) ≤ a (=ε)")
-            a_lo = float(f_min[constrained])
-            a_hi = float(f_max[constrained])
-            if mode == "single":
-                a_eps = st.slider(
-                    f"a = ε (górne ograniczenie F{constrained + 1})",
-                    min_value=a_lo,
-                    max_value=a_hi,
-                    value=float(0.5 * (a_lo + a_hi)),
-                    step=max((a_hi - a_lo) / 100, 1e-3),
-                )
-            else:
-                st.caption(f"Sweep a ∈ [{a_lo:.3f}, {a_hi:.3f}].")
-        else:
-            st.markdown("### Parametry S3")
-            st.caption("Minimalizacja ‖F(u)−x‖_{λ,p}; x — punkt dominujący.")
-            p_label = st.selectbox("p (metryka)", options=list(P_CHOICES.keys()), index=1)
-            p_val = P_CHOICES[p_label]
-            c1, c2 = st.columns(2)
-            ref1 = c1.number_input("x₁ (ref F₁)", value=ref1, format="%.4f")
-            ref2 = c2.number_input("x₂ (ref F₂)", value=ref2, format="%.4f")
-            if mode == "single":
-                lam1 = st.slider("λ₁ (λ₂ = 1−λ₁)", 0.01, 0.99, 0.5, 0.01)
-
-        run = st.button("Uruchom", type="primary", use_container_width=True)
-        bench = st.button("Benchmark S1/S2/S3 (czas)", use_container_width=True)
-        if st.button("Wyczyść wynik Cw3", use_container_width=True):
-            st.session_state.cw3_front = None
-            st.session_state.cw3_single = None
-            st.session_state.cw3_bench = None
-
+def _render_benchmark_mode(problem, n_points: int, scope_all: bool) -> None:
+    """Dedicated full-page mode: run S1+S2+S3 and compare times / fronts."""
+    st.subheader("Porównanie S1 / S2 / S3")
     st.markdown(
-        f"""
-**Instancja:** {problem.name}, minimalizacja F=(F₁,F₂)
-
-- `{problem.f1_latex}`
-- `{problem.f2_latex}`
-
-Orientacyjne zakresy celów (siatka):  
-F₁ ∈ [{f_min[0]:.3f}, {f_max[0]:.3f}], F₂ ∈ [{f_min[1]:.3f}, {f_max[1]:.3f}]
-"""
+        f"**U:** {problem.name}  ·  sweep **n = {n_points}** punktów na metodę"
+        + ("  ·  także pozostałe zbiory U" if scope_all else "")
     )
 
-    if bench:
-        with st.spinner("Benchmark czasowy S1 / S2 / S3 na wszystkich U…"):
-            st.session_state.cw3_bench = benchmark_scalarization(n_sweep=int(n_points))
+    c_run, c_hint = st.columns([1, 2])
+    run_bench = c_run.button(
+        "▶ Uruchom porównanie S1 + S2 + S3",
+        type="primary",
+        use_container_width=True,
+        key="cw3_bench_run_main",
+    )
+    c_hint.caption(
+        "Liczy niezależny sweep dla każdej metody, mierzy czas i zbiera metryki frontu. "
+        "Wynik pojawia się poniżej w tabeli i na wykresach."
+    )
 
+    if run_bench:
+        with st.spinner("Benchmark S1 / S2 / S3…"):
+            ids = list(INSTANCES.keys()) if scope_all else [problem.id]
+            st.session_state.cw3_bench = benchmark_scalarization(
+                instance_ids=ids,  # type: ignore[arg-type]
+                n_sweep=int(n_points),
+            )
+            # Fronts for the currently selected U (for side-by-side objective plots).
+            fronts = {}
+            for method in ("weighted_sum", "epsilon_constraint", "distance"):
+                fronts[method] = sort_front_by_f1(
+                    run_method_sweep(method, int(n_points), problem)
+                )
+            st.session_state.cw3_bench_fronts = fronts
+
+    bench_df: pd.DataFrame | None = st.session_state.cw3_bench
+    fronts = st.session_state.cw3_bench_fronts
+
+    if bench_df is None:
+        st.info(
+            "To jest tryb **Benchmark**. Naciśnij zielony przycisk powyżej, "
+            "żeby porównać czasy i fronty S1, S2 i S3 obok siebie."
+        )
+        return
+
+    # Filter table to current U unless comparing all
+    view = bench_df if scope_all else bench_df[bench_df["instance_id"] == problem.id]
+    if view.empty:
+        view = bench_df
+
+    st.markdown("#### Tabela porównawcza")
+    st.dataframe(_bench_show_table(view), use_container_width=True)
+
+    # Bar charts
+    st.markdown("#### Czas: sweep i średni solve")
+    fig_time = px.bar(
+        view,
+        x="method_label",
+        y=["sweep_time_ms", "mean_solve_ms"],
+        barmode="group",
+        facet_col="instance" if scope_all and view["instance"].nunique() > 1 else None,
+        labels={
+            "method_label": "Metoda",
+            "value": "czas [ms]",
+            "variable": "metryka",
+        },
+        title="Czas odtworzenia frontu (sweep) vs średni czas jednej skalaryzacji",
+    )
+    fig_time.update_layout(legend_title_text="")
+    st.plotly_chart(fig_time, use_container_width=True)
+
+    st.markdown("#### Pokrycie frontu (rozpiętość F₁ / F₂)")
+    fig_span = px.bar(
+        view,
+        x="method_label",
+        y=["f1_span", "f2_span"],
+        barmode="group",
+        facet_col="instance" if scope_all and view["instance"].nunique() > 1 else None,
+        labels={"method_label": "Metoda", "value": "rozpiętość", "variable": "oś"},
+    )
+    st.plotly_chart(fig_span, use_container_width=True)
+
+    # Side-by-side fronts for selected U
+    if fronts:
+        st.markdown(f"#### Fronty FP(U) na wybranym U — {problem.name}")
+        cols = st.columns(3)
+        for col, method in zip(
+            cols, ("weighted_sum", "epsilon_constraint", "distance"), strict=True
+        ):
+            front = fronts.get(method)
+            with col:
+                st.caption(METHOD_LABELS[method])
+                if front is not None:
+                    _, ofig = build_cw3_figures(
+                        front=front,
+                        problem=problem,
+                        method_label=BENCH_METHOD_LABELS[method],
+                    )
+                    ofig.update_layout(height=360, margin=dict(t=40, b=30, l=40, r=10))
+                    st.plotly_chart(ofig, use_container_width=True)
+                    st.metric("sweep [ms]", f"{front.elapsed_seconds * 1000:.1f}")
+                    mean_ms = (
+                        float(np.mean(front.per_solve_seconds) * 1000.0)
+                        if len(front.per_solve_seconds)
+                        else float("nan")
+                    )
+                    st.metric("śr. solve [ms]", f"{mean_ms:.2f}")
+
+    st.download_button(
+        "Pobierz benchmark (CSV)",
+        data=bench_df.to_csv(index=False).encode("utf-8"),
+        file_name="cw3_benchmark.csv",
+        mime="text/csv",
+    )
+
+
+def _render_single_or_sweep(
+    *,
+    problem,
+    method: str,
+    mode: str,
+    n_points: int,
+    lam1: float,
+    primary: int,
+    a_eps: float,
+    p_val: float,
+    ref1: float,
+    ref2: float,
+    run: bool,
+) -> None:
     if run:
         with st.spinner("Skalaryzacja / sweep Pareta…"):
             if mode == "sweep":
@@ -196,13 +260,9 @@ F₁ ∈ [{f_min[0]:.3f}, {f_max[0]:.3f}], F₂ ∈ [{f_min[1]:.3f}, {f_max[1]:.
 
     front = st.session_state.cw3_front
     single = st.session_state.cw3_single
-    bench_df: pd.DataFrame | None = st.session_state.cw3_bench
 
-    if front is None and single is None and bench_df is None:
-        st.info(
-            "Wybierz metodę i naciśnij **Uruchom**, albo **Benchmark S1/S2/S3** "
-            "dla porównania czasów i pokrycia frontu."
-        )
+    if front is None and single is None:
+        st.info("Ustaw parametry w sidebarze i naciśnij **Uruchom**.")
         dfig, ofig = build_cw3_figures(problem=problem)
         c1, c2 = st.columns(2)
         c1.plotly_chart(dfig, use_container_width=True)
@@ -211,12 +271,13 @@ F₁ ∈ [{f_min[0]:.3f}, {f_max[0]:.3f}], F₂ ∈ [{f_min[1]:.3f}, {f_max[1]:.
 
     n_ok = int(front.successes.sum()) if front is not None else 0
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Metoda", METHOD_LABELS[st.session_state.cw3_method].split("—")[0].strip())
-    m2.metric("|P(U,F)| (sweep)", n_ok if front is not None else "—")
+    m1.metric("Metoda", METHOD_LABELS[method].split("—")[0].strip())
+    m2.metric("|P(U,F)|", n_ok if front is not None else "—")
     if single is not None:
         m3.metric("F₁(u*)", f"{single.f[0]:.4f}")
         m4.metric("Czas solve", f"{single.elapsed_seconds * 1000:.2f} ms")
-    elif front is not None:
+    else:
+        assert front is not None
         m3.metric("Czas sweep", f"{front.elapsed_seconds * 1000:.1f} ms")
         mean_ms = (
             float(np.mean(front.per_solve_seconds) * 1000.0)
@@ -224,30 +285,19 @@ F₁ ∈ [{f_min[0]:.3f}, {f_max[0]:.3f}], F₂ ∈ [{f_min[1]:.3f}, {f_max[1]:.
             else float("nan")
         )
         m4.metric("Śr. solve", f"{mean_ms:.2f} ms")
-    else:
-        m3.metric("Benchmark", "gotowy" if bench_df is not None else "—")
-        m4.metric("Instancje", len(INSTANCES))
 
-    tab_plots, tab_table, tab_bench = st.tabs(
-        ["Wykresy U / F", "Tabela punktów", "Benchmark czasu"]
+    dfig, ofig = build_cw3_figures(
+        front=front,
+        single=single,
+        problem=problem,
+        method_label=METHOD_LABELS[method],
     )
-    with tab_plots:
-        if front is not None or single is not None:
-            dfig, ofig = build_cw3_figures(
-                front=front,
-                single=single,
-                problem=problem,
-                method_label=METHOD_LABELS[st.session_state.cw3_method],
-            )
-            c1, c2 = st.columns(2)
-            c1.plotly_chart(dfig, use_container_width=True)
-            c2.plotly_chart(ofig, use_container_width=True)
-            st.caption("Spline łączy punkty sweepu posortowane po F₁.")
-        else:
-            st.info("Uruchom sweep lub pojedyncze rozwiązanie, aby zobaczyć wykresy.")
+    c1, c2 = st.columns(2)
+    c1.plotly_chart(dfig, use_container_width=True)
+    c2.plotly_chart(ofig, use_container_width=True)
 
-    with tab_table:
-        if front is not None and len(front.decisions):
+    if front is not None and len(front.decisions):
+        with st.expander("Tabela punktów frontu"):
             df = pd.DataFrame(
                 {
                     "x": front.decisions[:, 0],
@@ -262,66 +312,132 @@ F₁ ∈ [{f_min[0]:.3f}, {f_max[0]:.3f}], F₂ ∈ [{f_min[1]:.3f}, {f_max[1]:.
                 }
             )
             st.dataframe(df, use_container_width=True)
-            st.download_button(
-                "Pobierz front (CSV)",
-                data=df.to_csv(index=False).encode("utf-8"),
-                file_name="cw3_pareto_front.csv",
-                mime="text/csv",
-            )
-        if single is not None:
-            st.subheader("Pojedyncze rozwiązanie")
-            st.write(
-                {
-                    "x": float(single.u[0]),
-                    "y": float(single.u[1]),
-                    "F1": float(single.f[0]),
-                    "F2": float(single.f[1]),
-                    "S(u)": float(single.scalar_value),
-                    "success": single.success,
-                    "elapsed_ms": single.elapsed_seconds * 1000.0,
-                    "params": {
-                        k: (v.tolist() if hasattr(v, "tolist") else v)
-                        for k, v in single.params.items()
-                    },
-                }
-            )
 
-    with tab_bench:
-        if bench_df is None:
-            st.warning("Naciśnij **Benchmark S1/S2/S3 (czas)** w sidebarze.")
+
+def render_cw3() -> None:
+    """Render the Ćwiczenie 3 UI with a first-class Benchmark mode."""
+    _init_cw3_state()
+
+    st.title("Ćw. 3 — metody skalaryzacji")
+    st.caption(
+        "Przełącz **tryb** poniżej: Benchmark porównuje S1/S2/S3 obok siebie "
+        "(czas + front). Sweep / pojedyncze — jedna metoda."
+    )
+
+    # ── Main-panel mode switch (hard to miss) ────────────────────────────────
+    ui_mode = st.radio(
+        "Tryb Ćw. 3",
+        options=list(CW3_MODES.keys()),
+        format_func=lambda k: CW3_MODES[k],
+        horizontal=True,
+        key="cw3_ui_mode",
+    )
+
+    with st.sidebar:
+        st.markdown("## Ćw. 3 — ustawienia")
+        st.success("Jesteś w panelu Ćw. 3 (nie Ćw. 2).")
+        instance_id = st.selectbox(
+            "Zbiór dopuszczalny U",
+            options=list(INSTANCES.keys()),
+            format_func=lambda i: INSTANCES[i].name,
+            index=list(INSTANCES.keys()).index(st.session_state.cw3_instance)
+            if st.session_state.cw3_instance in INSTANCES
+            else 0,
+            key="cw3_instance_select",
+        )
+        st.session_state.cw3_instance = instance_id
+        problem = get_problem(instance_id)
+        f_min, f_max = estimate_objective_bounds(problem, n_per_axis=50)
+
+        n_points = st.slider("Liczba punktów aproksymacji n", 5, 80, 30, 1)
+
+        scope_all = False
+        method = st.session_state.cw3_method
+        lam1 = 0.5
+        primary = 0
+        a_eps = float(0.5 * (f_min[1] + f_max[1]))
+        p_val = 2.0
+        ref1, ref2 = float(f_min[0] - 0.1), float(f_min[1] - 0.1)
+        run = False
+
+        if ui_mode == "benchmark":
+            st.markdown("### Benchmark")
+            scope_all = st.checkbox(
+                "Porównaj też na wszystkich U (nie tylko wybrane)",
+                value=False,
+                help="Domyślnie: S1/S2/S3 tylko na wybranym U. Zaznacz, by dodać pozostałe zbiory.",
+            )
+            st.caption("Uruchomienie jest na stronie głównej (duży zielony przycisk).")
         else:
-            show = bench_df[
-                [
-                    "instance",
-                    "method_label",
-                    "n_success",
-                    "success_rate",
-                    "sweep_time_ms",
-                    "mean_solve_ms",
-                    "f1_span",
-                    "f2_span",
-                    "mean_spacing",
-                    "dominated_share",
-                ]
-            ].copy()
-            show = show.rename(
-                columns={
-                    "instance": "U",
-                    "method_label": "Metoda",
-                    "n_success": "|P|",
-                    "success_rate": "sukces",
-                    "sweep_time_ms": "sweep [ms]",
-                    "mean_solve_ms": "śr. solve [ms]",
-                    "f1_span": "rozpiętość F1",
-                    "f2_span": "rozpiętość F2",
-                    "mean_spacing": "śr. odstęp",
-                    "dominated_share": "udział zdominowanych",
-                }
+            method = st.selectbox(
+                "Metoda",
+                options=list(METHOD_LABELS.keys()),
+                format_func=lambda m: METHOD_LABELS[m],
+                key="cw3_method_select",
             )
-            st.dataframe(show, use_container_width=True)
-            st.download_button(
-                "Pobierz benchmark (CSV)",
-                data=bench_df.to_csv(index=False).encode("utf-8"),
-                file_name="cw3_benchmark.csv",
-                mime="text/csv",
-            )
+            st.session_state.cw3_method = method
+
+            if method == "weighted_sum":
+                st.markdown("### Parametry S1")
+                if ui_mode == "single":
+                    lam1 = st.slider("λ₁ (λ₂ = 1−λ₁)", 0.01, 0.99, 0.5, 0.01)
+            elif method == "epsilon_constraint":
+                st.markdown("### Parametry S2")
+                primary = st.radio(
+                    "Kryterium optymalizowane Fⱼ",
+                    options=[0, 1],
+                    format_func=lambda i: f"F{i + 1}",
+                    horizontal=True,
+                )
+                constrained = 1 - primary
+                a_lo = float(f_min[constrained])
+                a_hi = float(f_max[constrained])
+                if ui_mode == "single":
+                    a_eps = st.slider(
+                        f"a = ε (górne ograniczenie F{constrained + 1})",
+                        min_value=a_lo,
+                        max_value=a_hi,
+                        value=float(0.5 * (a_lo + a_hi)),
+                        step=max((a_hi - a_lo) / 100, 1e-3),
+                    )
+            else:
+                st.markdown("### Parametry S3")
+                p_label = st.selectbox("p (metryka)", options=list(P_CHOICES.keys()), index=1)
+                p_val = P_CHOICES[p_label]
+                c1, c2 = st.columns(2)
+                ref1 = c1.number_input("x₁ (ref F₁)", value=ref1, format="%.4f")
+                ref2 = c2.number_input("x₂ (ref F₂)", value=ref2, format="%.4f")
+                if ui_mode == "single":
+                    lam1 = st.slider("λ₁ (λ₂ = 1−λ₁)", 0.01, 0.99, 0.5, 0.01)
+
+            run = st.button("Uruchom", type="primary", use_container_width=True)
+
+        if st.button("Wyczyść wyniki Cw3", use_container_width=True):
+            st.session_state.cw3_front = None
+            st.session_state.cw3_single = None
+            st.session_state.cw3_bench = None
+            st.session_state.cw3_bench_fronts = None
+
+    st.markdown(
+        f"**Instancja:** {problem.name}  \n"
+        f"`{problem.f1_latex}` · `{problem.f2_latex}`  \n"
+        f"Zakresy (siatka): F₁ ∈ [{f_min[0]:.3f}, {f_max[0]:.3f}], "
+        f"F₂ ∈ [{f_min[1]:.3f}, {f_max[1]:.3f}]"
+    )
+
+    if ui_mode == "benchmark":
+        _render_benchmark_mode(problem, n_points, scope_all)
+    else:
+        _render_single_or_sweep(
+            problem=problem,
+            method=method,
+            mode=ui_mode,
+            n_points=n_points,
+            lam1=lam1,
+            primary=primary,
+            a_eps=a_eps,
+            p_val=p_val,
+            ref1=ref1,
+            ref2=ref2,
+            run=run,
+        )

@@ -32,7 +32,7 @@ _lab = st.sidebar.radio(
     format_func=lambda k: (
         "Ćw. 2 — punkty niezdominowane"
         if k == "cw2"
-        else "Ćw. 3 — skalaryzacja / zbiór Pareta"
+        else "Ćw. 3 — skalaryzacja / Benchmark S1·S2·S3"
     ),
     key="lab_switch",
 )
