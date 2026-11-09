@@ -38,7 +38,7 @@ P_CHOICES = {
 }
 
 CW3_MODES = {
-    "benchmark": "⚡ Benchmark — porównaj S1 / S2 / S3",
+    "benchmark": "Benchmark — porównaj S1 / S2 / S3",
     "sweep": "Sweep Pareta (jedna metoda)",
     "single": "Pojedyncze rozwiązanie",
 }
@@ -57,6 +57,18 @@ def _init_cw3_state() -> None:
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
+    # Guard against stale session values (e.g. old label strings) breaking radios.
+    if st.session_state.get("cw3_ui_mode") not in CW3_MODES:
+        st.session_state.cw3_ui_mode = "benchmark"
+    if st.session_state.get("cw3_instance") not in INSTANCES:
+        st.session_state.cw3_instance = "square_m1_1"
+    if st.session_state.get("cw3_method") not in METHOD_LABELS:
+        st.session_state.cw3_method = "weighted_sum"
+
+
+def _chart(fig, *, key: str) -> None:
+    """Plotly chart with required unique key (Streamlit 1.65+)."""
+    st.plotly_chart(fig, width="stretch", key=key)
 
 
 def _bench_show_table(bench_df: pd.DataFrame) -> pd.DataFrame:
@@ -102,9 +114,9 @@ def _render_benchmark_mode(problem, n_points: int, scope_all: bool) -> None:
 
     c_run, c_hint = st.columns([1, 2])
     run_bench = c_run.button(
-        "▶ Uruchom porównanie S1 + S2 + S3",
+        "Uruchom porównanie S1 + S2 + S3",
         type="primary",
-        use_container_width=True,
+        width="stretch",
         key="cw3_bench_run_main",
     )
     c_hint.caption(
@@ -143,36 +155,46 @@ def _render_benchmark_mode(problem, n_points: int, scope_all: bool) -> None:
         view = bench_df
 
     st.markdown("#### Tabela porównawcza")
-    st.dataframe(_bench_show_table(view), use_container_width=True)
+    st.dataframe(_bench_show_table(view), width="stretch")
 
-    # Bar charts
+    # Bar charts (unique keys required by Streamlit ≥1.65)
     st.markdown("#### Czas: sweep i średni solve")
+    time_long = view.melt(
+        id_vars=["instance", "method_label"],
+        value_vars=["sweep_time_ms", "mean_solve_ms"],
+        var_name="metryka",
+        value_name="czas_ms",
+    )
     fig_time = px.bar(
-        view,
+        time_long,
         x="method_label",
-        y=["sweep_time_ms", "mean_solve_ms"],
+        y="czas_ms",
+        color="metryka",
         barmode="group",
         facet_col="instance" if scope_all and view["instance"].nunique() > 1 else None,
-        labels={
-            "method_label": "Metoda",
-            "value": "czas [ms]",
-            "variable": "metryka",
-        },
+        labels={"method_label": "Metoda", "czas_ms": "czas [ms]"},
         title="Czas odtworzenia frontu (sweep) vs średni czas jednej skalaryzacji",
     )
     fig_time.update_layout(legend_title_text="")
-    st.plotly_chart(fig_time, use_container_width=True)
+    _chart(fig_time, key="cw3_bench_time_bars")
 
     st.markdown("#### Pokrycie frontu (rozpiętość F₁ / F₂)")
+    span_long = view.melt(
+        id_vars=["instance", "method_label"],
+        value_vars=["f1_span", "f2_span"],
+        var_name="oś",
+        value_name="rozpietosc",
+    )
     fig_span = px.bar(
-        view,
+        span_long,
         x="method_label",
-        y=["f1_span", "f2_span"],
+        y="rozpietosc",
+        color="oś",
         barmode="group",
         facet_col="instance" if scope_all and view["instance"].nunique() > 1 else None,
-        labels={"method_label": "Metoda", "value": "rozpiętość", "variable": "oś"},
+        labels={"method_label": "Metoda", "rozpietosc": "rozpiętość"},
     )
-    st.plotly_chart(fig_span, use_container_width=True)
+    _chart(fig_span, key="cw3_bench_span_bars")
 
     # Side-by-side fronts for selected U
     if fronts:
@@ -191,20 +213,24 @@ def _render_benchmark_mode(problem, n_points: int, scope_all: bool) -> None:
                         method_label=BENCH_METHOD_LABELS[method],
                     )
                     ofig.update_layout(height=360, margin=dict(t=40, b=30, l=40, r=10))
-                    st.plotly_chart(ofig, use_container_width=True)
-                    st.metric("sweep [ms]", f"{front.elapsed_seconds * 1000:.1f}")
+                    _chart(ofig, key=f"cw3_bench_front_{method}")
+                    st.metric(
+                        f"sweep [ms] · {method}",
+                        f"{front.elapsed_seconds * 1000:.1f}",
+                    )
                     mean_ms = (
                         float(np.mean(front.per_solve_seconds) * 1000.0)
                         if len(front.per_solve_seconds)
                         else float("nan")
                     )
-                    st.metric("śr. solve [ms]", f"{mean_ms:.2f}")
+                    st.metric(f"śr. solve [ms] · {method}", f"{mean_ms:.2f}")
 
     st.download_button(
         "Pobierz benchmark (CSV)",
         data=bench_df.to_csv(index=False).encode("utf-8"),
         file_name="cw3_benchmark.csv",
         mime="text/csv",
+        key="cw3_bench_download",
     )
 
 
@@ -265,8 +291,10 @@ def _render_single_or_sweep(
         st.info("Ustaw parametry w sidebarze i naciśnij **Uruchom**.")
         dfig, ofig = build_cw3_figures(problem=problem)
         c1, c2 = st.columns(2)
-        c1.plotly_chart(dfig, use_container_width=True)
-        c2.plotly_chart(ofig, use_container_width=True)
+        with c1:
+            _chart(dfig, key="cw3_preview_decision")
+        with c2:
+            _chart(ofig, key="cw3_preview_objective")
         return
 
     n_ok = int(front.successes.sum()) if front is not None else 0
@@ -293,8 +321,10 @@ def _render_single_or_sweep(
         method_label=METHOD_LABELS[method],
     )
     c1, c2 = st.columns(2)
-    c1.plotly_chart(dfig, use_container_width=True)
-    c2.plotly_chart(ofig, use_container_width=True)
+    with c1:
+        _chart(dfig, key=f"cw3_result_decision_{method}_{mode}")
+    with c2:
+        _chart(ofig, key=f"cw3_result_objective_{method}_{mode}")
 
     if front is not None and len(front.decisions):
         with st.expander("Tabela punktów frontu"):
@@ -311,7 +341,7 @@ def _render_single_or_sweep(
                     ),
                 }
             )
-            st.dataframe(df, use_container_width=True)
+            st.dataframe(df, width="stretch")
 
 
 def render_cw3() -> None:
@@ -410,9 +440,9 @@ def render_cw3() -> None:
                 if ui_mode == "single":
                     lam1 = st.slider("λ₁ (λ₂ = 1−λ₁)", 0.01, 0.99, 0.5, 0.01)
 
-            run = st.button("Uruchom", type="primary", use_container_width=True)
+            run = st.button("Uruchom", type="primary", width="stretch", key="cw3_run_single_sweep")
 
-        if st.button("Wyczyść wyniki Cw3", use_container_width=True):
+        if st.button("Wyczyść wyniki Cw3", width="stretch", key="cw3_clear"):
             st.session_state.cw3_front = None
             st.session_state.cw3_single = None
             st.session_state.cw3_bench = None

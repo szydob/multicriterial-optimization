@@ -32,11 +32,17 @@ _lab = st.sidebar.radio(
     format_func=lambda k: (
         "Ćw. 2 — punkty niezdominowane"
         if k == "cw2"
-        else "Ćw. 3 — skalaryzacja / Benchmark S1·S2·S3"
+        else "Ćw. 3 — skalaryzacja / Benchmark S1-S2-S3"
     ),
     key="lab_switch",
 )
 if _lab == "cw3":
+    import sys
+    from pathlib import Path
+
+    _app_dir = Path(__file__).resolve().parent
+    if str(_app_dir) not in sys.path:
+        sys.path.insert(0, str(_app_dir))
     from cw3_page import render_cw3
 
     render_cw3()
