@@ -1,4 +1,4 @@
-"""OWD — Streamlit GUI: kryteria, dane, algorytmy, wykres, benchmark, eksport."""
+"""OWD — Streamlit GUI: lab 2 (P(X)) + lab 3 (skalaryzacja / Pareto sweep)."""
 
 from __future__ import annotations
 
@@ -24,6 +24,23 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# Top-level lab switch (Cw2 discrete P(X) vs Cw3 scalarization / Pareto reconstruction).
+_lab = st.sidebar.radio(
+    "Ćwiczenie",
+    options=["cw2", "cw3"],
+    format_func=lambda k: (
+        "Ćw. 2 — punkty niezdominowane"
+        if k == "cw2"
+        else "Ćw. 3 — skalaryzacja / zbiór Pareta"
+    ),
+    key="lab_switch",
+)
+if _lab == "cw3":
+    from cw3_page import render_cw3
+
+    render_cw3()
+    st.stop()
 
 ALGORITHM_LABELS: dict[AlgorithmName, str] = {
     "naive_no_filter": "Naiwny 1 — bez filtracji",

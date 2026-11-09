@@ -1,8 +1,10 @@
 # OWD — Optymalizacja wielokryterialna dyskretna
 
-Aplikacja (Streamlit) i biblioteka do wyznaczania zbioru punktów niezdominowanych \(P(X)\) oraz benchmarku algorytmów optymalizacji dyskretnej wielokryterialnej.
+Aplikacja (Streamlit) i biblioteka do wyznaczania zbioru punktów niezdominowanych \(P(X)\) oraz skalaryzacji wielokryterialnej (Ćw. 3).
 
-Kurs: *Optymalizacja wielokryterialna* (AGH, LAiWD KAiR), ćwiczenie 2 — na podstawie instrukcji OWD (algorytmy z/bez filtracji, punkt idealny, Kung–Luccio–Preparata).
+Kurs: *Optymalizacja wielokryterialna* (AGH, LAiWD KAiR):
+- **Ćw. 2** — OWD: algorytmy z/bez filtracji, punkt idealny, Kung–Luccio–Preparata
+- **Ćw. 3** — skalaryzacja: suma ważona, ε-ograniczenia, odległość ℓ_p od punktu dominującego; sweep parametrów odtwarza P(U,F) / FP(U)
 
 ## Stack
 
@@ -39,12 +41,15 @@ uv run pytest
 ## Layout
 
 ```
-app/                 Streamlit UI (sidebar + panel wyników)
+app/
+  streamlit_app.py   Przełącznik Ćw.2 / Ćw.3 + GUI lab 2
+  cw3_page.py        GUI lab 3 (skalaryzacja + sweep Pareta)
 data/examples/       Przykładowe zestawy punktów
 docs/                Notatki z labów / decyzje
 outputs/             Wyniki, eksporty (gitignored)
 src/owd/
   algorithms/        Naiwne, punkt idealny, Kung–Luccio–Preparata
+  scalarization/     Cw3: problem, S1/S2/S3, sweep, wykresy U/F
   animation.py       Klatki animacji budowy P(X)
   dominance.py       Porównania dominacji
   export.py          Eksport XLSX / CSV
@@ -57,7 +62,14 @@ tests/
 
 ## Funkcje GUI
 
-1. **Sidebar (zwijany)** — kryteria, generator, sortowanie, wczytywanie pliku, wybór algorytmu
+### Ćw. 2
+1. **Sidebar** — kryteria, generator, sortowanie, wczytywanie pliku, wybór algorytmu
 2. **Panel główny** — metryki, P(X), wykres, animacja, benchmark, eksport XLS
 3. Algorytmy: naiwny bez/z filtracją, punkt idealny, Kung–Luccio–Preparata
+
+### Ćw. 3
+1. Przełącznik w sidebarze → **Ćw. 3 — skalaryzacja / zbiór Pareta**
+2. Metody: suma ważona (S1), ε-ograniczenia (S2), odległość od punktu dominującego (S3, ℓ_p / Czebyszew)
+3. Tryb **sweep** odtwarza dyskretny front P(U,F) / FP(U); tryb pojedynczy liczy jedno rozwiązanie
+4. Wykresy: przestrzeń decyzji U=[1,4]² oraz przestrzeń celów F (spline przez punkty sweepu)
 
