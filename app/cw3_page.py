@@ -8,10 +8,9 @@ import plotly.express as px
 import streamlit as st
 
 from owd.scalarization import (
-    INSTANCES,
+    DEFAULT_PROBLEM,
     benchmark_scalarization,
     estimate_objective_bounds,
-    get_problem,
     solve_distance,
     solve_epsilon_constraint,
     solve_weighted_sum,
@@ -51,7 +50,6 @@ def _init_cw3_state() -> None:
         "cw3_method": "weighted_sum",
         "cw3_bench": None,
         "cw3_bench_fronts": None,
-        "cw3_instance": "square_m1_1",
         "cw3_ui_mode": "benchmark",
     }
     for key, value in defaults.items():
@@ -60,8 +58,6 @@ def _init_cw3_state() -> None:
     # Guard against stale session values (e.g. old label strings) breaking radios.
     if st.session_state.get("cw3_ui_mode") not in CW3_MODES:
         st.session_state.cw3_ui_mode = "benchmark"
-    if st.session_state.get("cw3_instance") not in INSTANCES:
-        st.session_state.cw3_instance = "square_m1_1"
     if st.session_state.get("cw3_method") not in METHOD_LABELS:
         st.session_state.cw3_method = "weighted_sum"
 
@@ -104,13 +100,10 @@ def _bench_show_table(bench_df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def _render_benchmark_mode(problem, n_points: int, scope_all: bool) -> None:
+def _render_benchmark_mode(problem, n_points: int) -> None:
     """Dedicated full-page mode: run S1+S2+S3 and compare times / fronts."""
     st.subheader("Porównanie S1 / S2 / S3")
-    st.markdown(
-        f"**U:** {problem.name}  ·  sweep **n = {n_points}** punktów na metodę"
-        + ("  ·  także pozostałe zbiory U" if scope_all else "")
-    )
+    st.markdown(f"**U:** {problem.name}  ·  sweep **n = {n_points}** punktów na metodę")
 
     c_run, c_hint = st.columns([1, 2])
     run_bench = c_run.button(
@@ -126,12 +119,10 @@ def _render_benchmark_mode(problem, n_points: int, scope_all: bool) -> None:
 
     if run_bench:
         with st.spinner("Benchmark S1 / S2 / S3…"):
-            ids = list(INSTANCES.keys()) if scope_all else [problem.id]
             st.session_state.cw3_bench = benchmark_scalarization(
-                instance_ids=ids,  # type: ignore[arg-type]
                 n_sweep=int(n_points),
+                problem=problem,
             )
-            # Fronts for the currently selected U (for side-by-side objective plots).
             fronts = {}
             for method in ("weighted_sum", "epsilon_constraint", "distance"):
                 fronts[method] = sort_front_by_f1(
@@ -144,15 +135,12 @@ def _render_benchmark_mode(problem, n_points: int, scope_all: bool) -> None:
 
     if bench_df is None:
         st.info(
-            "To jest tryb **Benchmark**. Naciśnij zielony przycisk powyżej, "
+            "To jest tryb **Benchmark**. Naciśnij przycisk powyżej, "
             "żeby porównać czasy i fronty S1, S2 i S3 obok siebie."
         )
         return
 
-    # Filter table to current U unless comparing all
-    view = bench_df if scope_all else bench_df[bench_df["instance_id"] == problem.id]
-    if view.empty:
-        view = bench_df
+    view = bench_df
 
     st.markdown("#### Tabela porównawcza")
     st.dataframe(_bench_show_table(view), width="stretch")
@@ -171,7 +159,6 @@ def _render_benchmark_mode(problem, n_points: int, scope_all: bool) -> None:
         y="czas_ms",
         color="metryka",
         barmode="group",
-        facet_col="instance" if scope_all and view["instance"].nunique() > 1 else None,
         labels={"method_label": "Metoda", "czas_ms": "czas [ms]"},
         title="Czas odtworzenia frontu (sweep) vs średni czas jednej skalaryzacji",
     )
@@ -191,7 +178,6 @@ def _render_benchmark_mode(problem, n_points: int, scope_all: bool) -> None:
         y="rozpietosc",
         color="oś",
         barmode="group",
-        facet_col="instance" if scope_all and view["instance"].nunique() > 1 else None,
         labels={"method_label": "Metoda", "rozpietosc": "rozpiętość"},
     )
     _chart(fig_span, key="cw3_bench_span_bars")
@@ -363,25 +349,16 @@ def render_cw3() -> None:
         key="cw3_ui_mode",
     )
 
+    problem = DEFAULT_PROBLEM
+    f_min, f_max = estimate_objective_bounds(problem, n_per_axis=80)
+
     with st.sidebar:
         st.markdown("## Ćw. 3 — ustawienia")
         st.success("Jesteś w panelu Ćw. 3 (nie Ćw. 2).")
-        instance_id = st.selectbox(
-            "Zbiór dopuszczalny U",
-            options=list(INSTANCES.keys()),
-            format_func=lambda i: INSTANCES[i].name,
-            index=list(INSTANCES.keys()).index(st.session_state.cw3_instance)
-            if st.session_state.cw3_instance in INSTANCES
-            else 0,
-            key="cw3_instance_select",
-        )
-        st.session_state.cw3_instance = instance_id
-        problem = get_problem(instance_id)
-        f_min, f_max = estimate_objective_bounds(problem, n_per_axis=50)
+        st.caption("Zbiór dopuszczalny: **U = [1, 4] × [1, 4]** (jedyna instancja).")
 
         n_points = st.slider("Liczba punktów aproksymacji n", 5, 80, 30, 1)
 
-        scope_all = False
         method = st.session_state.cw3_method
         lam1 = 0.5
         primary = 0
@@ -392,12 +369,7 @@ def render_cw3() -> None:
 
         if ui_mode == "benchmark":
             st.markdown("### Benchmark")
-            scope_all = st.checkbox(
-                "Porównaj też na wszystkich U (nie tylko wybrane)",
-                value=False,
-                help="Domyślnie: S1/S2/S3 tylko na wybranym U. Zaznacz, by dodać pozostałe zbiory.",
-            )
-            st.caption("Uruchomienie jest na stronie głównej (duży zielony przycisk).")
+            st.caption("Uruchomienie jest na stronie głównej (przycisk porównania S1+S2+S3).")
         else:
             method = st.selectbox(
                 "Metoda",
@@ -456,7 +428,7 @@ def render_cw3() -> None:
     )
 
     if ui_mode == "benchmark":
-        _render_benchmark_mode(problem, n_points, scope_all)
+        _render_benchmark_mode(problem, n_points)
     else:
         _render_single_or_sweep(
             problem=problem,

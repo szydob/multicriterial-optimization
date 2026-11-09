@@ -1,4 +1,4 @@
-"""Three Cw3 scalarization methods + parameter sweeps with timing."""
+"""Three Cw3 scalarization methods + Pareto sweeps that return n distinct points."""
 
 from __future__ import annotations
 
@@ -16,8 +16,6 @@ MethodName = Literal["weighted_sum", "epsilon_constraint", "distance"]
 
 @dataclass
 class ScalarizationSolution:
-    """Single scalarized solve result."""
-
     method: MethodName
     u: np.ndarray
     f: np.ndarray
@@ -30,8 +28,6 @@ class ScalarizationSolution:
 
 @dataclass
 class FrontApproximation:
-    """Discrete approximation of P(U,F) / FP(U) from a parameter sweep."""
-
     method: MethodName
     decisions: np.ndarray
     objectives: np.ndarray
@@ -45,7 +41,7 @@ def _constraints_for(problem: BiObjectiveProblem) -> list[dict]:
     return [{"type": "ineq", "fun": g} for g in problem.nonlinear_constraints]
 
 
-def _minimize(
+def _minimize_once(
     fun,
     x0: np.ndarray,
     problem: BiObjectiveProblem,
@@ -62,15 +58,48 @@ def _minimize(
         method="SLSQP",
         bounds=problem.bounds,
         constraints=cons,
-        options={"ftol": 1e-10, "maxiter": 400, "disp": False},
+        options={"ftol": 1e-12, "maxiter": 500, "disp": False},
     )
     elapsed = time.perf_counter() - t0
     u = np.asarray(res.x, dtype=float)
-    return u, float(res.fun), bool(res.success), str(res.message), elapsed
+    # Prefer feasible evaluation even if solver flagged failure but stayed in bounds.
+    ok = bool(res.success) or problem.is_feasible(u, tol=1e-6)
+    return u, float(res.fun), ok, str(res.message), elapsed
+
+
+def _minimize_multistart(
+    fun,
+    problem: BiObjectiveProblem,
+    *,
+    extra_constraints: list | None = None,
+    prefer: np.ndarray | None = None,
+) -> tuple[np.ndarray, float, bool, str, float]:
+    starts = problem.start_points()
+    if prefer is not None:
+        starts = [np.asarray(prefer, dtype=float), *starts]
+    best: tuple[np.ndarray, float, bool, str, float] | None = None
+    total_t = 0.0
+    last_msg = ""
+    for x0 in starts:
+        u, sval, ok, msg, elapsed = _minimize_once(
+            fun, x0, problem, extra_constraints=extra_constraints
+        )
+        total_t += elapsed
+        last_msg = msg
+        if not ok:
+            continue
+        if best is None or sval < best[1]:
+            best = (u, sval, True, msg, total_t)
+    if best is None:
+        # Fall back to default start even if marked unsuccessful.
+        u, sval, ok, msg, elapsed = _minimize_once(
+            fun, problem.default_x0(), problem, extra_constraints=extra_constraints
+        )
+        return u, sval, ok, msg, total_t + elapsed
+    return best[0], best[1], best[2], best[3], total_t
 
 
 def weighted_norm(y: np.ndarray, lam: np.ndarray, p: float) -> float:
-    """Weighted ℓ_p norm ‖y‖_{λ,p}; p≥1 or p=∞ (Chebyshev)."""
     y = np.asarray(y, dtype=float).reshape(-1)
     lam = np.asarray(lam, dtype=float).reshape(-1)
     if y.shape != lam.shape:
@@ -91,7 +120,6 @@ def solve_weighted_sum(
     problem: BiObjectiveProblem | None = None,
     x0: np.ndarray | None = None,
 ) -> ScalarizationSolution:
-    """S1: minimize Σ λᵢ Fᵢ(u), λ>0."""
     problem = problem or DEFAULT_PROBLEM
     lam = np.asarray(lam, dtype=float).reshape(-1)
     if lam.size != 2 or np.any(lam <= 0):
@@ -100,8 +128,8 @@ def solve_weighted_sum(
     def objective(u: np.ndarray) -> float:
         return float(np.dot(lam, problem.evaluate(u)))
 
-    u, sval, ok, msg, elapsed = _minimize(
-        objective, x0 if x0 is not None else problem.default_x0(), problem
+    u, sval, ok, msg, elapsed = _minimize_multistart(
+        objective, problem, prefer=x0
     )
     return ScalarizationSolution(
         method="weighted_sum",
@@ -122,7 +150,6 @@ def solve_epsilon_constraint(
     problem: BiObjectiveProblem | None = None,
     x0: np.ndarray | None = None,
 ) -> ScalarizationSolution:
-    """S2: minimize Fⱼ s.t. Fᵢ(u) ≤ a for i≠j."""
     problem = problem or DEFAULT_PROBLEM
     if primary not in (0, 1):
         raise ValueError("primary must be 0 (F1) or 1 (F2)")
@@ -134,10 +161,10 @@ def solve_epsilon_constraint(
     def cons_ineq(u: np.ndarray) -> float:
         return float(a - problem.evaluate(u)[constrained])
 
-    u, sval, ok, msg, elapsed = _minimize(
+    u, sval, ok, msg, elapsed = _minimize_multistart(
         objective,
-        x0 if x0 is not None else problem.default_x0(),
         problem,
+        prefer=x0,
         extra_constraints=[{"type": "ineq", "fun": cons_ineq}],
     )
     return ScalarizationSolution(
@@ -160,7 +187,6 @@ def solve_distance(
     problem: BiObjectiveProblem | None = None,
     x0: np.ndarray | None = None,
 ) -> ScalarizationSolution:
-    """S3: minimize ‖F(u)−x‖_{λ,p} to dominating reference x."""
     problem = problem or DEFAULT_PROBLEM
     ref = np.asarray(ref, dtype=float).reshape(-1)
     lam = np.asarray(lam, dtype=float).reshape(-1)
@@ -172,8 +198,8 @@ def solve_distance(
     def objective(u: np.ndarray) -> float:
         return weighted_norm(problem.evaluate(u) - ref, lam, p)
 
-    u, sval, ok, msg, elapsed = _minimize(
-        objective, x0 if x0 is not None else problem.default_x0(), problem
+    u, sval, ok, msg, elapsed = _minimize_multistart(
+        objective, problem, prefer=x0
     )
     return ScalarizationSolution(
         method="distance",
@@ -188,9 +214,119 @@ def solve_distance(
 
 
 def _normalize_weights(t: float) -> np.ndarray:
-    eps = 1e-6
+    # Keep endpoints slightly inside (0,1) so both weights stay strictly positive.
+    eps = 1e-3
     t = float(np.clip(t, eps, 1.0 - eps))
     return np.array([t, 1.0 - t], dtype=float)
+
+
+def _is_dominated(a: np.ndarray, b: np.ndarray) -> bool:
+    return bool(np.all(b <= a) and np.any(b < a))
+
+
+def _nondominated_mask(obj: np.ndarray) -> np.ndarray:
+    n = len(obj)
+    keep = np.ones(n, dtype=bool)
+    for i in range(n):
+        if not keep[i]:
+            continue
+        for j in range(n):
+            if i == j or not keep[j]:
+                continue
+            if _is_dominated(obj[i], obj[j]):
+                keep[i] = False
+                break
+    return keep
+
+
+def _dedupe_front(
+    decisions: np.ndarray,
+    objectives: np.ndarray,
+    params: list[dict],
+    times: np.ndarray,
+    *,
+    tol: float = 1e-4,
+) -> tuple[np.ndarray, np.ndarray, list[dict], np.ndarray]:
+    """Drop near-duplicate objective points (keep first along F1 order)."""
+    if len(objectives) == 0:
+        return decisions, objectives, params, times
+    order = np.argsort(objectives[:, 0], kind="mergesort")
+    decisions = decisions[order]
+    objectives = objectives[order]
+    times = times[order]
+    params = [params[i] for i in order]
+    keep: list[int] = []
+    for i, f in enumerate(objectives):
+        if not keep:
+            keep.append(i)
+            continue
+        prev = objectives[keep[-1]]
+        if np.linalg.norm(f - prev) > tol:
+            keep.append(i)
+    idx = np.asarray(keep, dtype=int)
+    return decisions[idx], objectives[idx], [params[i] for i in idx], times[idx]
+
+
+def _subsample_evenly(
+    decisions: np.ndarray,
+    objectives: np.ndarray,
+    params: list[dict],
+    times: np.ndarray,
+    n: int,
+) -> tuple[np.ndarray, np.ndarray, list[dict], np.ndarray]:
+    if len(objectives) <= n:
+        return decisions, objectives, params, times
+    # Even indices along sorted F1.
+    idx = np.linspace(0, len(objectives) - 1, n)
+    idx = np.unique(np.round(idx).astype(int))
+    # If unique rounding collapsed, fall back to slice
+    if len(idx) < n:
+        idx = np.linspace(0, len(objectives) - 1, n).astype(int)
+    return (
+        decisions[idx],
+        objectives[idx],
+        [params[i] for i in idx],
+        times[idx],
+    )
+
+
+def _finalize_front(
+    method: MethodName,
+    decisions: list[np.ndarray],
+    objectives: list[np.ndarray],
+    params: list[dict],
+    oks: list[bool],
+    times: list[float],
+    elapsed: float,
+    n_target: int,
+) -> FrontApproximation:
+    dec = np.asarray(decisions, dtype=float)
+    obj = np.asarray(objectives, dtype=float)
+    tim = np.asarray(times, dtype=float)
+    ok = np.asarray(oks, dtype=bool)
+    if np.any(ok):
+        dec, obj, params, tim = dec[ok], obj[ok], [params[i] for i, k in enumerate(ok) if k], tim[ok]
+    nd = _nondominated_mask(obj) if len(obj) else np.array([], dtype=bool)
+    if len(nd):
+        dec, obj, params, tim = dec[nd], obj[nd], [params[i] for i, k in enumerate(nd) if k], tim[nd]
+    dec, obj, params, tim = _dedupe_front(dec, obj, params, tim)
+    dec, obj, params, tim = _subsample_evenly(dec, obj, params, tim, n_target)
+    return FrontApproximation(
+        method=method,
+        decisions=dec,
+        objectives=obj,
+        params=params,
+        successes=np.ones(len(dec), dtype=bool),
+        elapsed_seconds=elapsed,
+        per_solve_seconds=tim,
+    )
+
+
+def _anchor_points(problem: BiObjectiveProblem) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Individual minima of F1 and F2 (anchors for ε range / utopia)."""
+    sol1 = solve_weighted_sum(np.array([1.0 - 1e-3, 1e-3]), problem=problem)
+    sol2 = solve_weighted_sum(np.array([1e-3, 1.0 - 1e-3]), problem=problem)
+    return sol1.u, sol1.f, sol2.u, sol2.f
 
 
 def sweep_weighted_sum(
@@ -201,7 +337,9 @@ def sweep_weighted_sum(
     problem = problem or DEFAULT_PROBLEM
     if n < 2:
         raise ValueError("n must be ≥ 2")
-    ts = np.linspace(0.0, 1.0, n)
+    # Oversample then subsample to n distinct nondominated points.
+    m = max(n, min(5 * n, 120))
+    ts = np.linspace(0.0, 1.0, m)
     decisions, objectives, params, oks, times = [], [], [], [], []
     x0 = problem.default_x0()
     t_all = time.perf_counter()
@@ -215,14 +353,15 @@ def sweep_weighted_sum(
         params.append(sol.params)
         oks.append(sol.success)
         times.append(sol.elapsed_seconds)
-    return FrontApproximation(
-        method="weighted_sum",
-        decisions=np.asarray(decisions, dtype=float),
-        objectives=np.asarray(objectives, dtype=float),
-        params=params,
-        successes=np.asarray(oks, dtype=bool),
-        elapsed_seconds=time.perf_counter() - t_all,
-        per_solve_seconds=np.asarray(times, dtype=float),
+    return _finalize_front(
+        "weighted_sum",
+        decisions,
+        objectives,
+        params,
+        oks,
+        times,
+        time.perf_counter() - t_all,
+        n,
     )
 
 
@@ -234,18 +373,24 @@ def sweep_epsilon_constraint(
     a_max: float | None = None,
     problem: BiObjectiveProblem | None = None,
 ) -> FrontApproximation:
-    from owd.scalarization.problem import estimate_objective_bounds
-
     problem = problem or DEFAULT_PROBLEM
     if n < 2:
         raise ValueError("n must be ≥ 2")
-    f_min, f_max = estimate_objective_bounds(problem)
+    # Pareto-relevant ε range: between F_constrained at the two anchors.
+    _, f_at_min_primary, _, f_at_min_other = _anchor_points(problem)
     constrained = 1 - primary
-    lo = f_min[constrained] if a_min is None else float(a_min)
-    hi = f_max[constrained] if a_max is None else float(a_max)
+    # When minimizing F_primary, ε on the other objective runs from its value at
+    # the primary-optimum (loose) down/up to its individual minimum (tight).
+    lo_auto = float(min(f_at_min_primary[constrained], f_at_min_other[constrained]))
+    hi_auto = float(max(f_at_min_primary[constrained], f_at_min_other[constrained]))
+    # Pad slightly so endpoints are attainable.
+    pad = 0.02 * max(hi_auto - lo_auto, 1.0)
+    lo = lo_auto + pad if a_min is None else float(a_min)
+    hi = hi_auto - pad if a_max is None else float(a_max)
     if hi <= lo:
-        raise ValueError("a_max must be > a_min")
-    alphas = np.linspace(lo, hi, n)
+        lo, hi = lo_auto, hi_auto
+    m = max(n, min(5 * n, 120))
+    alphas = np.linspace(lo, hi, m)
     decisions, objectives, params, oks, times = [], [], [], [], []
     x0 = problem.default_x0()
     t_all = time.perf_counter()
@@ -258,14 +403,15 @@ def sweep_epsilon_constraint(
         params.append(sol.params)
         oks.append(sol.success)
         times.append(sol.elapsed_seconds)
-    return FrontApproximation(
-        method="epsilon_constraint",
-        decisions=np.asarray(decisions, dtype=float),
-        objectives=np.asarray(objectives, dtype=float),
-        params=params,
-        successes=np.asarray(oks, dtype=bool),
-        elapsed_seconds=time.perf_counter() - t_all,
-        per_solve_seconds=np.asarray(times, dtype=float),
+    return _finalize_front(
+        "epsilon_constraint",
+        decisions,
+        objectives,
+        params,
+        oks,
+        times,
+        time.perf_counter() - t_all,
+        n,
     )
 
 
@@ -276,16 +422,16 @@ def sweep_distance(
     p: float = 2.0,
     problem: BiObjectiveProblem | None = None,
 ) -> FrontApproximation:
-    from owd.scalarization.problem import estimate_objective_bounds
-
     problem = problem or DEFAULT_PROBLEM
     if n < 2:
         raise ValueError("n must be ≥ 2")
+    _, f1, _, f2 = _anchor_points(problem)
     if ref is None:
-        f_min, _ = estimate_objective_bounds(problem)
-        ref = f_min - 0.05 * np.abs(f_min) - 0.05
+        # Utopia: componentwise better than both anchors.
+        ref = np.minimum(f1, f2) - 0.05
     ref = np.asarray(ref, dtype=float)
-    ts = np.linspace(0.0, 1.0, n)
+    m = max(n, min(5 * n, 120))
+    ts = np.linspace(0.0, 1.0, m)
     decisions, objectives, params, oks, times = [], [], [], [], []
     x0 = problem.default_x0()
     t_all = time.perf_counter()
@@ -299,38 +445,33 @@ def sweep_distance(
         params.append(sol.params)
         oks.append(sol.success)
         times.append(sol.elapsed_seconds)
-    return FrontApproximation(
-        method="distance",
-        decisions=np.asarray(decisions, dtype=float),
-        objectives=np.asarray(objectives, dtype=float),
-        params=params,
-        successes=np.asarray(oks, dtype=bool),
-        elapsed_seconds=time.perf_counter() - t_all,
-        per_solve_seconds=np.asarray(times, dtype=float),
+    return _finalize_front(
+        "distance",
+        decisions,
+        objectives,
+        params,
+        oks,
+        times,
+        time.perf_counter() - t_all,
+        n,
     )
 
 
 def sort_front_by_f1(front: FrontApproximation) -> FrontApproximation:
-    """Sort successful points by F1 for spline / polyline plotting."""
-    mask = front.successes
-    if not np.any(mask):
+    """Sort points by F1 (already mostly sorted; keep API stable)."""
+    if len(front.objectives) == 0:
         return front
-    obj = front.objectives[mask]
-    dec = front.decisions[mask]
-    times = (
-        front.per_solve_seconds[mask]
-        if len(front.per_solve_seconds) == len(front.successes)
-        else front.per_solve_seconds
-    )
-    order = np.argsort(obj[:, 0], kind="mergesort")
-    params = [front.params[i] for i, ok in enumerate(front.successes) if ok]
-    params = [params[i] for i in order]
+    order = np.argsort(front.objectives[:, 0], kind="mergesort")
     return FrontApproximation(
         method=front.method,
-        decisions=dec[order],
-        objectives=obj[order],
-        params=params,
-        successes=np.ones(len(order), dtype=bool),
+        decisions=front.decisions[order],
+        objectives=front.objectives[order],
+        params=[front.params[i] for i in order],
+        successes=front.successes[order] if len(front.successes) == len(order) else np.ones(len(order), dtype=bool),
         elapsed_seconds=front.elapsed_seconds,
-        per_solve_seconds=np.asarray(times, dtype=float)[order] if len(times) else times,
+        per_solve_seconds=(
+            front.per_solve_seconds[order]
+            if len(front.per_solve_seconds) == len(front.decisions)
+            else front.per_solve_seconds
+        ),
     )

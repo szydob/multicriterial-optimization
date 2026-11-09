@@ -65,18 +65,6 @@ def build_decision_figure(
             line=dict(color="#94a3b8", width=2, dash="dot"),
         )
     )
-    if problem.id == "unit_disk":
-        theta = np.linspace(0, 2 * np.pi, 200)
-        fig.add_trace(
-            go.Scatter(
-                x=np.cos(theta),
-                y=np.sin(theta),
-                mode="lines",
-                name="brzeg koła",
-                line=dict(color="#e2e8f0", width=1.5),
-            )
-        )
-
     if len(U):
         fig.add_trace(
             go.Scatter(
